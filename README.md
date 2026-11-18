@@ -28,6 +28,14 @@ Boshqa choralar:
 
 **Muhim:** PINni unutsangiz, ma'lumotni tiklab bo'lmaydi. Qulf ekranidagi "PINni unutdim" tugmasi hamma narsani o'chirib, boshidan boshlaydi.
 
+## Qulaylik imkoniyatlari (1.1.0)
+- Rasm: kameradan olish yoki galereyadan tanlash (kamera vaqtinchalik fayli ishlatilgach nollar bilan yozilib o'chiriladi).
+- Zaxira nusxa: parol bilan shifrlangan `.seyfbak` fayl (AES-256-GCM, PBKDF2 310 000). Tiklash mavjud kontaktlarga qo'shiladi.
+- Telefon raqami avtomatik `+998 90 123 45 67` ko'rinishida formatlanadi.
+- Kontakt o'chirilsa, "Bekor qilish" bilan qaytarish mumkin (faqat ilova ochiq turganda).
+- A-Z tez o'tish chizig'i; qidiruvda qaysi maydon bo'yicha topilgani ajratib ko'rsatiladi.
+- Yumshoq dizayn: pastel palitra, gradient fon, yumaloq kartalar.
+
 ## APK yig'ish
 
 ### 1-usul: GitHub Actions (kompyuterda Android Studio shart emas)

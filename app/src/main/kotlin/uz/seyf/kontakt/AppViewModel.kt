@@ -10,6 +10,7 @@ import android.os.PersistableBundle
 import android.os.SystemClock
 import android.util.LruCache
 import androidx.biometric.BiometricManager
+import androidx.core.content.FileProvider
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,11 +30,21 @@ import kotlinx.coroutines.withContext
 import uz.seyf.kontakt.data.Contact
 import uz.seyf.kontakt.data.PhotoUtils
 import uz.seyf.kontakt.security.AttemptGuard
+import uz.seyf.kontakt.security.Backup
 import uz.seyf.kontakt.security.Vault
+import java.io.File
+import java.io.RandomAccessFile
 import javax.crypto.Cipher
 import kotlin.math.ceil
 
 enum class Phase { Setup, Locked, Unlocked }
+
+/** Snackbar hodisasi. [onAction] bosilsa (masalan, "Bekor qilish") chaqiriladi. */
+data class UiEvent(
+    val message: String,
+    val actionLabel: String? = null,
+    val onAction: (() -> Unit)? = null,
+)
 
 sealed interface Route {
     data object Home : Route
@@ -49,6 +60,7 @@ data class UiState(
     val contacts: List<Contact> = emptyList(),
     val query: String = "",
     val busy: Boolean = false,
+    val working: Boolean = false,
     val pinError: String? = null,
     val shake: Int = 0,
     val lockRemainingSec: Int = 0,
@@ -74,8 +86,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
-    val events: SharedFlow<String> = _events.asSharedFlow()
+    private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 8)
+    val events: SharedFlow<UiEvent> = _events.asSharedFlow()
+
+    private var pendingDelete: Pair<Contact, ByteArray?>? = null
+    private var captureFile: File? = null
 
     /** Rasm tanlash kabi tashqi oynalar ochilganda true. onStop'da darhol bloklashni kechiktiradi. */
     @Volatile
@@ -301,6 +316,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!vault.isSetUp) return
         vault.lock()
         photoCache.evictAll()
+        pendingDelete = null
+        wipeCaptureDir()
         autoBioDone = false
         externalFlow = false
         _state.update {
@@ -401,14 +418,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             ioMutex.withLock {
                 try {
+                    val target = _state.value.contacts.find { it.id == id } ?: return@withLock
+                    val photoBytes = if (target.hasPhoto) vault.loadPhoto(id) else null
                     val updated = _state.value.contacts.filter { it.id != id }
                     vault.saveContacts(updated)
                     vault.deletePhoto(id)
                     photoCache.evictAll()
+                    pendingDelete = target to photoBytes
                     _state.update { it.copy(contacts = updated, route = Route.Home) }
-                    toast("Kontakt o'chirildi")
+                    _events.tryEmit(UiEvent("Kontakt o'chirildi", "Bekor qilish") { undoDelete() })
                 } catch (e: Exception) {
                     toast("O'chirib bo'lmadi: ${e.javaClass.simpleName}")
+                }
+            }
+        }
+    }
+
+    private fun undoDelete() {
+        val (contact, photoBytes) = pendingDelete ?: return
+        pendingDelete = null
+        viewModelScope.launch(Dispatchers.IO) {
+            ioMutex.withLock {
+                try {
+                    if (photoBytes != null) vault.savePhoto(contact.id, photoBytes)
+                    val updated = (_state.value.contacts.filter { it.id != contact.id } + contact)
+                        .sortedWith(Contact.ORDER)
+                    vault.saveContacts(updated)
+                    photoCache.evictAll()
+                    _state.update { it.copy(contacts = updated) }
+                    toast("Kontakt qaytarildi")
+                } catch (e: Exception) {
+                    toast("Qaytarib bo'lmadi: ${e.javaClass.simpleName}")
                 }
             }
         }
@@ -431,6 +471,124 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             PhotoUtils.prepareAvatar(getApplication<Application>(), uri)
         } catch (e: Exception) {
             null
+        }
+    }
+
+    // ---------- Kamera ----------
+
+    /** Kamera rasmi yoziladigan vaqtinchalik fayl uchun URI (FileProvider orqali). */
+    fun prepareCapture(): Uri? = try {
+        val app = getApplication<Application>()
+        val dir = File(app.cacheDir, "capture").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val f = File(dir, "cap_${System.currentTimeMillis()}.jpg")
+        captureFile = f
+        FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", f)
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Kamera natijasini kvadrat JPEG'ga aylantiradi va vaqtinchalik faylni nollar bilan yozib o'chiradi. */
+    suspend fun processCapture(ok: Boolean): ByteArray? = withContext(Dispatchers.IO) {
+        val f = captureFile
+        captureFile = null
+        try {
+            if (!ok || f == null || !f.exists() || f.length() == 0L) null
+            else PhotoUtils.prepareAvatar(getApplication<Application>(), Uri.fromFile(f))
+        } catch (e: Exception) {
+            null
+        } finally {
+            f?.let { shred(it) }
+        }
+    }
+
+    private fun shred(f: File) {
+        try {
+            if (f.exists()) {
+                RandomAccessFile(f, "rw").use { raf ->
+                    val zeros = ByteArray(8192)
+                    var left = raf.length()
+                    raf.seek(0)
+                    while (left > 0) {
+                        val n = minOf(left, zeros.size.toLong()).toInt()
+                        raf.write(zeros, 0, n)
+                        left -= n
+                    }
+                    raf.fd.sync()
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            f.delete()
+        }
+    }
+
+    private fun wipeCaptureDir() {
+        captureFile = null
+        File(getApplication<Application>().cacheDir, "capture").listFiles()?.forEach { shred(it) }
+    }
+
+    // ---------- Zaxira nusxa ----------
+
+    fun exportBackup(uri: Uri, password: String) {
+        if (_state.value.working) return
+        _state.update { it.copy(working = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val pwd = password.toCharArray()
+            try {
+                val contacts = ioMutex.withLock { _state.value.contacts }
+                val bytes = Backup.build(contacts, { id -> runCatching { vault.loadPhoto(id) }.getOrNull() }, pwd)
+                val out = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+                    ?: throw IllegalStateException("Fayl ochilmadi")
+                out.use { it.write(bytes) }
+                toast("Zaxira nusxa saqlandi (${contacts.size} ta kontakt)")
+            } catch (e: Exception) {
+                toast("Zaxira nusxa yaratib bo'lmadi: ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                pwd.fill('\u0000')
+                _state.update { it.copy(working = false) }
+            }
+        }
+    }
+
+    fun importBackup(uri: Uri, password: String) {
+        if (_state.value.working) return
+        _state.update { it.copy(working = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val pwd = password.toCharArray()
+            try {
+                val data = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw Backup.BadBackupException("Faylni o'qib bo'lmadi")
+                if (data.size > MAX_BACKUP_BYTES) throw Backup.BadBackupException("Fayl juda katta")
+                val parsed = Backup.parse(data, pwd)
+
+                ioMutex.withLock {
+                    val byId = _state.value.contacts.associateBy { it.id }.toMutableMap()
+                    var added = 0
+                    var updatedCount = 0
+                    for (c in parsed.contacts) {
+                        val existing = byId[c.id]
+                        val take = existing == null || c.updatedAt > existing.updatedAt
+                        if (!take) continue
+                        val photo = parsed.photos[c.id]
+                        if (photo != null) vault.savePhoto(c.id, photo)
+                        byId[c.id] = c.copy(hasPhoto = photo != null)
+                        if (existing == null) added++ else updatedCount++
+                    }
+                    val merged = byId.values.sortedWith(Contact.ORDER)
+                    vault.saveContacts(merged)
+                    photoCache.evictAll()
+                    _state.update { it.copy(contacts = merged) }
+                    toast("Tiklandi: $added ta yangi, $updatedCount ta yangilandi")
+                }
+            } catch (e: Backup.BadBackupException) {
+                toast(e.message ?: "Zaxira fayli noto'g'ri")
+            } catch (e: Exception) {
+                toast("Tiklab bo'lmadi: ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                pwd.fill('\u0000')
+                _state.update { it.copy(working = false) }
+            }
         }
     }
 
@@ -459,12 +617,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toast(msg: String) {
-        _events.tryEmit(msg)
+        _events.tryEmit(UiEvent(msg))
     }
 
     private fun secondsOf(ms: Long): Int = ceil(ms / 1000.0).toInt()
 
     private companion object {
         const val KEY_IDLE = "idle_sec"
+        const val MAX_BACKUP_BYTES = 64 * 1024 * 1024
     }
 }

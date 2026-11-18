@@ -2,7 +2,6 @@ package uz.seyf.kontakt.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,10 +30,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -43,16 +46,22 @@ import kotlinx.coroutines.delay
 import uz.seyf.kontakt.data.Contact
 import kotlin.math.abs
 
-private val AvatarColors = listOf(
-    Color(0xFF3949AB), Color(0xFF00796B), Color(0xFFC25B00), Color(0xFF8E24AA),
-    Color(0xFFAD1457), Color(0xFF00695C), Color(0xFF6D4C41), Color(0xFF1565C0),
+private val AvatarGradients = listOf(
+    Color(0xFF5C6BC0) to Color(0xFF3949AB),
+    Color(0xFF26A69A) to Color(0xFF00796B),
+    Color(0xFFFF9A5A) to Color(0xFFE0651A),
+    Color(0xFFAB5CC9) to Color(0xFF7B1FA2),
+    Color(0xFFEC6A9B) to Color(0xFFC2185B),
+    Color(0xFF4DB6AC) to Color(0xFF00897B),
+    Color(0xFF9C7B6B) to Color(0xFF6D4C41),
+    Color(0xFF5AA9F0) to Color(0xFF1565C0),
 )
 
 typealias PhotoLoader = suspend (String, Int) -> ImageBitmap?
 
 /**
- * Doira shaklidagi avatar. Rasm bo'lsa — rasm, bo'lmasa — ism bosh harflari.
- * [override] berilsa (masalan, endi tanlangan rasm) — shu ko'rsatiladi.
+ * Doira shaklidagi avatar. Rasm bo'lsa, rasm; bo'lmasa, ism bosh harflari gradient fonda.
+ * [override] berilsa (masalan, endi tanlangan rasm), shu ko'rsatiladi.
  */
 @Composable
 fun Avatar(
@@ -76,10 +85,16 @@ fun Avatar(
             modifier = modifier.size(size).clip(CircleShape),
         )
     } else {
-        val bg = if (contact == null) MaterialTheme.colorScheme.surfaceContainerHighest
-        else AvatarColors[abs(contact.id.hashCode()) % AvatarColors.size]
+        val brush: Brush = if (contact == null) {
+            Brush.linearGradient(
+                listOf(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.surfaceContainerHighest),
+            )
+        } else {
+            val pair = AvatarGradients[abs(contact.id.hashCode()) % AvatarGradients.size]
+            Brush.linearGradient(listOf(pair.first, pair.second))
+        }
         Box(
-            modifier = modifier.size(size).clip(CircleShape).background(bg),
+            modifier = modifier.size(size).clip(CircleShape).background(brush),
             contentAlignment = Alignment.Center,
         ) {
             val initials = contact?.initials.orEmpty()
@@ -97,6 +112,39 @@ fun Avatar(
                     tint = if (contact == null) MaterialTheme.colorScheme.onSurfaceVariant else Color.White,
                     modifier = Modifier.size(size * 0.5f),
                 )
+            }
+        }
+    }
+}
+
+/** Yumshoq rangli doira ichidagi belgi. */
+@Composable
+fun IconBubble(icon: ImageVector, modifier: Modifier = Modifier, size: Dp = 40.dp) {
+    Box(
+        modifier = modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.size(size * 0.5f),
+        )
+    }
+}
+
+/** [query] topilgan joyni rangli fon bilan ajratib ko'rsatadi. */
+@Composable
+fun highlighted(text: String, query: String): AnnotatedString {
+    val q = query.trim()
+    val bg = MaterialTheme.colorScheme.tertiaryContainer
+    val fg = MaterialTheme.colorScheme.onTertiaryContainer
+    return remember(text, q, bg, fg) {
+        buildAnnotatedString {
+            append(text)
+            if (q.isNotEmpty()) {
+                val i = text.indexOf(q, ignoreCase = true)
+                if (i >= 0) addStyle(SpanStyle(background = bg, color = fg, fontWeight = FontWeight.SemiBold), i, i + q.length)
             }
         }
     }
@@ -120,11 +168,11 @@ fun InfoRow(
         }
     }
     Row(
-        modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(16.dp))
+        IconBubble(icon)
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
@@ -157,15 +205,6 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.SemiBold,
-        modifier = modifier.padding(horizontal = 4.dp),
+        modifier = modifier.padding(horizontal = 8.dp),
     )
-}
-
-@Composable
-fun RowSpacer(w: Dp = 8.dp) = Spacer(Modifier.width(w))
-
-@Composable
-fun CenteredRow(content: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { content() }
 }

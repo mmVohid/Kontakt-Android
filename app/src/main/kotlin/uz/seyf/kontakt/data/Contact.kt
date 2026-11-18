@@ -45,6 +45,32 @@ data class Contact(
         return qPlate.length >= 2 && carPlate.replace(" ", "").lowercase().contains(qPlate)
     }
 
+    /**
+     * Qidiruvda ism/telefon bo'yicha emas, boshqa maydon bo'yicha topilgan bo'lsa,
+     * (maydon nomi, qiymat) juftligini qaytaradi. Ro'yxatda "nima uchun topildi" ko'rsatish uchun.
+     */
+    fun matchedExtra(query: String): Pair<String, String>? {
+        val q = query.trim()
+        if (q.isEmpty()) return null
+        if (displayName.contains(q, ignoreCase = true) || phone.contains(q, ignoreCase = true)) return null
+        listOf(
+            "Otasining ismi" to patronymic,
+            "Pasport" to passportSeries,
+            "JSHSHIR" to pinfl,
+            "Avto raqam" to carPlate,
+            "Manzil" to address,
+            "Izoh" to note,
+        ).firstOrNull { it.second.contains(q, ignoreCase = true) }?.let { return it }
+        val plateQ = q.replace(" ", "")
+        if (plateQ.length >= 2 && carPlate.replace(" ", "").contains(plateQ, ignoreCase = true)) {
+            return "Avto raqam" to carPlate
+        }
+        val digits = q.filter { it.isDigit() }
+        if (digits.length >= 3 && phone.filter { it.isDigit() }.contains(digits)) return "Telefon" to phone
+        if (lastName.contains(q, ignoreCase = true)) return "Familya" to lastName
+        return null
+    }
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("fn", firstName).put("ln", lastName).put("pt", patronymic)
         .put("ph", phone).put("ps", passportSeries).put("pf", pinfl).put("ad", address)

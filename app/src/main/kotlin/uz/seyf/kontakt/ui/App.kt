@@ -9,7 +9,9 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,7 +65,14 @@ fun SeyfApp(
 private fun MainNav(vm: AppViewModel, s: UiState, onBioToggle: (Boolean) -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
-        vm.events.collect { snackbar.showSnackbar(it) }
+        vm.events.collect { e ->
+            val result = snackbar.showSnackbar(
+                message = e.message,
+                actionLabel = e.actionLabel,
+                duration = if (e.actionLabel != null) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+            if (result == SnackbarResult.ActionPerformed) e.onAction?.invoke()
+        }
     }
 
     BackHandler(enabled = s.route != Route.Home) { vm.back() }
@@ -103,8 +112,11 @@ private fun MainNav(vm: AppViewModel, s: UiState, onBioToggle: (Boolean) -> Unit
                 snackbar = snackbar,
                 loadPhoto = loadPhoto,
                 processPhoto = { uri -> vm.processPhoto(uri) },
+                prepareCapture = { vm.prepareCapture() },
+                processCapture = { ok -> vm.processCapture(ok) },
                 setExternalFlow = { vm.externalFlow = it },
                 onActivity = vm::poke,
+                onToast = vm::toast,
                 onSave = { contact, photo, remove -> vm.saveContact(contact, photo, remove) },
                 onBack = vm::back,
             )
@@ -112,12 +124,16 @@ private fun MainNav(vm: AppViewModel, s: UiState, onBioToggle: (Boolean) -> Unit
                 bioAvailable = s.bioAvailable,
                 bioEnabled = s.bioEnabled,
                 idleTimeoutSec = s.idleTimeoutSec,
+                working = s.working,
                 snackbar = snackbar,
                 onBack = vm::back,
                 onBioToggle = onBioToggle,
                 onChangePin = vm::openChangePin,
                 onIdleTimeout = vm::setIdleTimeout,
                 onLockNow = vm::lock,
+                setExternalFlow = { vm.externalFlow = it },
+                onExport = { uri, pwd -> vm.exportBackup(uri, pwd) },
+                onImport = { uri, pwd -> vm.importBackup(uri, pwd) },
             )
             Route.ChangePin -> ChangePinScreen(
                 busy = s.busy,

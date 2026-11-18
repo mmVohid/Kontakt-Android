@@ -2,6 +2,9 @@ package uz.seyf.kontakt.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
@@ -104,16 +108,24 @@ fun PinEntry(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(1f))
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(if (compact) 52.dp else 68.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
+            Box(contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .size(if (compact) 76.dp else 100.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)),
+                )
+                Box(
+                    Modifier
+                        .size(if (compact) 54.dp else 70.dp)
+                        .clip(CircleShape)
+                        .background(brandBrush()),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Icon(
                         Icons.Default.Lock,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        tint = Color.White,
                         modifier = Modifier.size(if (compact) 26.dp else 32.dp),
                     )
                 }
@@ -146,8 +158,13 @@ fun PinEntry(
                         if (filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                         label = "dot",
                     )
-                    Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(if (filled) 16.dp else 12.dp).clip(CircleShape).background(color))
+                    val dot by animateDpAsState(
+                        if (filled) 18.dp else 12.dp,
+                        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                        label = "dotSize",
+                    )
+                    Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(dot).clip(CircleShape).background(color))
                     }
                 }
             }
@@ -202,7 +219,8 @@ private fun KeyButton(label: String, size: Dp, enabled: Boolean, onClick: () -> 
         onClick = onClick,
         enabled = enabled,
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shadowElevation = 3.dp,
         modifier = Modifier
             .size(size)
             .alpha(if (enabled) 1f else 0.4f)
@@ -236,7 +254,7 @@ fun LockScreen(
 
     val locked = lockRemainingSec > 0
 
-    Column(Modifier.fillMaxSize().systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(softBackdrop()).systemBarsPadding()) {
         if (!isSetup) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = { askWipe = true }) { Text("PINni unutdim") }
